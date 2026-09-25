@@ -1,0 +1,6 @@
+datasets
+transformers
+sentence-transformers
+faiss-cpu
+numpy
+tqdm
