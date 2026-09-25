@@ -181,11 +181,25 @@ Both indexes are built on `blackwell-maxq-0`, so their embeddings come from
 the same device.
 
 ```bash
+# held-out eval set: articles created after the 2023-11-01 dump
+.venv/bin/python -m scripts.build_heldout_eval --n-articles 1000 --out data/eval/wiki_postdump
+
 # top-k retrieval; queries.jsonl has {"id": ..., "query": ...} per line
 .venv/bin/python -m scripts.retrieve --index data/wiki_index/wikipedia_1k \
   --queries data/retrieval/queries/<set>.jsonl --k 5 --device cuda \
   --out data/retrieval/wikipedia_1k/<set>
 ```
+
+## Evaluation
+
+The language-modeling protocol is in [`docs/eval_protocol.md`](docs/eval_protocol.md):
+- Protocol B (RETRO-style): retrieve with the previous 64-token chunk and
+  score the next one.
+- bits-per-byte is the main metric.
+- Eval text is held out: Wikipedia articles created after the datastore's
+  2023-11-01 dump.
+
+Read the doc before changing anything in the evaluation.
 
 ## Retrieval (RAG arm)
 
@@ -255,6 +269,10 @@ al. 2020) and RAG (Lewis et al. 2020):
 scripts/build_wiki_index.py   Wikipedia -> 64-token chunks -> FAISS index
 scripts/retrieve.py           queries -> dense exact top-k chunks
 scripts/provenance.py         git SHA / file-hash helpers for manifests
+scripts/build_heldout_eval.py post-dump Wikipedia articles -> held-out eval set
+docs/eval_protocol.md         evaluation protocol (Protocol B), metric, held-out text
+docs/heldout_eval_set.md      how the held-out eval set was built, its stats and checks
+data/eval/wiki_postdump/      held-out eval articles (on blackwell-maxq-0 only)
 data/wiki_index/wikipedia_*/  built indexes (gitignored; on blackwell-maxq-0 only)
 data/wiki_index/logs/         build logs (on blackwell-maxq-0 only)
 data/retrieval/queries/       query sets (JSONL)
