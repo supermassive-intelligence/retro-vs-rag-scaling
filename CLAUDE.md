@@ -107,10 +107,12 @@ produced each curve.
 
 ### GitHub
 
-- Standard workflow: feature branch → PR → review → merge, per the
-  guardrails above. The repository is named **`retro-vs-rag-scaling`**. No
-  GitHub remote exists yet; ask the user which org and visibility before
-  creating it.
+- Work happens directly on `main`; no branches or PRs are required for this
+  research repo. Pushes still need an explicit request, per the guardrails
+  above. The repository is
+  [`supermassive-intelligence/retro-vs-rag-scaling`](https://github.com/supermassive-intelligence/retro-vs-rag-scaling)
+  (`origin`). It is **public**, so never commit credentials, IPs, or
+  internal data.
 - Use `gh` for all GitHub operations (issues, PRs, checks) rather than the
   API directly.
 
