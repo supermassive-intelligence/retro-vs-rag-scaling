@@ -114,22 +114,44 @@ produced each curve.
 - Use `gh` for all GitHub operations (issues, PRs, checks) rather than the
   API directly.
 
+### Development workflow: code locally, run on Blackwell
+
+- **Write and edit code only in the local checkout.** Never edit code on
+  the remote. The next sync overwrites any remote edits.
+- **Move code only with rsync**, local → remote. Include `.git`, so the
+  manifest can record the commit SHA, and exclude `.venv/` and `data/`:
+  ```bash
+  rsync -az --delete --exclude .venv --exclude data --exclude __pycache__ \
+    ./ blackwell-maxq-0:/home/normal/sai/retro-vs-rag-scaling/
+  ```
+  `--delete` keeps the remote an exact mirror of the code. Excluded paths
+  are never deleted by it, so remote data and the venv are safe.
+- **Data, runs and heavy development live on Blackwell** under
+  `/home/normal/sai/retro-vs-rag-scaling`, which has its own `.venv`.
+  Datasets, indexes, logs and run outputs stay there. The local `.venv` is
+  only for editing, linting and tiny smoke tests. Don't copy data back
+  unless asked.
+- Commit before syncing for a real run. A run from a dirty tree records
+  `dirty: true` and doesn't count as a result.
+
 ### Blackwell machine access
 
 - Use `ssh blackwell-maxq-0` (user `normal`, 4× RTX PRO 6000 Blackwell,
-  96 GB each; configured in `~/.ssh/config`). The repo lives at
-  `~/retro-vs-rag-scaling` there, with its own `.venv`. `blackwell2` is a
-  different, personally owned machine that this key cannot reach.
+  96 GB each; configured in `~/.ssh/config`). The account is shared, and
+  `/home/normal/sai/` is this user's workspace. Stay inside it. `blackwell2`
+  is a different, personally owned machine that this key cannot reach.
 - The alias sets `RequestTTY yes`. Pass `-T` for scripted, non-interactive
   commands.
 - The GPUs are shared. Pick an idle one with `nvidia-smi` and pin it with
   `CUDA_VISIBLE_DEVICES`.
-- Prefer non-interactive, logged job invocations (e.g. `ssh -T
-  blackwell-maxq-0 'cd ~/retro-vs-rag-scaling && nohup <cmd> > <logfile>
-  2>&1 &'`) over long-lived interactive sessions, so runs survive a dropped
-  connection and leave a log to cite in results.
-- Sync code with `rsync` **including `.git`**, so the manifest can record the
-  commit SHA on the remote. Exclude `.venv/` and `data/`.
+- Launch long jobs detached and logged, with stdin closed. Without the
+  `< /dev/null` the SSH session stays open until the job ends:
+  ```bash
+  ssh -T blackwell-maxq-0 'cd /home/normal/sai/retro-vs-rag-scaling && \
+    CUDA_VISIBLE_DEVICES=<gpu> nohup <cmd> > data/<...>/logs/<name>.log 2>&1 < /dev/null &'
+  ```
+  Put logs under `data/`, which is gitignored. A log inside the tracked tree
+  would mark the next run's manifest dirty.
 - Record the machine name, GPU(s) used, and driver/CUDA version alongside
   any timing or throughput numbers reported from Blackwell runs — those
   numbers aren't portable without them.
@@ -144,7 +166,8 @@ produced each curve.
 
 ## Common commands
 
-Use the venv interpreter. Scripts run as modules from the repo root:
+Run these on `blackwell-maxq-0` from `/home/normal/sai/retro-vs-rag-scaling`,
+using the venv interpreter. Scripts run as modules from the repo root:
 
 ```bash
 .venv/bin/pip install -r requirements.txt
@@ -173,12 +196,19 @@ the same device.
   hashes.
 - With the same seed and shuffle buffer the stream order is identical, so a
   smaller index's articles are a prefix of a larger one's (nested subsets).
+  Verified for `wikipedia_1k` against `wikipedia_100k`: identical doc IDs
+  and chunks.
+- `wikipedia_1k` and `wikipedia_100k` were built at `77173e6` under the
+  repo's old path `/home/normal/retro-vs-rag-scaling`, and their manifests'
+  `command` field still shows that path. The move didn't change the files,
+  and the hashes still match.
 
 ## Layout
 
 ```
 scripts/build_wiki_index.py   Wikipedia -> 64-token chunks -> FAISS index
-data/wiki_index/wikipedia_*/  built indexes (gitignored)
+data/wiki_index/wikipedia_*/  built indexes (gitignored; on blackwell-maxq-0 only)
+data/wiki_index/logs/         build logs (on blackwell-maxq-0 only)
 ```
 
 Keep this section in step with the real layout, and update it in the same
