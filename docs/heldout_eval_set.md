@@ -8,8 +8,10 @@ none of them can appear in any index. This is the text Protocol B is scored on
   (`articles.jsonl` + `manifest.json`)
 - **Built by:** `scripts/build_heldout_eval.py`
 - **Command:** `python -m scripts.build_heldout_eval --n-articles 1000 --out data/eval/wiki_postdump`
-- **Code:** `6fead9e` with uncommitted changes (manifest `dirty: true`). A
-  rebuild from a clean commit should produce the same `articles.jsonl` hash.
+- **Code:** `f6c1653`, clean tree.
+- **`articles.jsonl` SHA-256:** `2f321f78313b50831522316eec18ba17415565c1a547e28bd09e6a4104792626`
+- **Deterministic:** an earlier build from `6fead9e` with uncommitted changes
+  produced a byte-identical file, with the same rejections.
 
 ## Why post-dump articles
 

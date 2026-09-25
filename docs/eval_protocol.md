@@ -93,9 +93,34 @@ than how often each arm retrieves. This is the reasoning behind maailma's arm C
 (`evals/arms.py`). Protocol A retrieves once per window while GCCA retrieves
 every 64 tokens, which would confound the two.
 
+## Implementation (`scripts/eval_lm.py`)
+
+- `--arm none` is the LM-only baseline: one forward pass per window, with
+  per-chunk losses read off the 512 target positions. `--arm rag` gives each
+  Ti its own forward pass.
+- **Neighbors:** k = 4 per scored chunk. Each hit returns its chunk plus the
+  next chunk of the same article, up to 128 tokens (`--neighbor-span
+  chunk+next`). This is what the GCCA arm reads in maailma (`neighbors = 4`,
+  `span_text`), so both arms see the same retrieved text.
+- **Order:** neighbors are placed in reverse rank order, best last (closest to
+  the text), each followed by `"\n\n"`, then the window text.
+- **Leakage filter:** 16 candidates are retrieved per query. Any candidate that
+  shares 32 or more consecutive tokens with the window's 512-token target is
+  dropped, and the first 4 survivors are kept. MassiveDS's other test
+  (13-gram Jaccard ≥ 0.8) is omitted because it can't trigger here: a
+  128-token span against a 512-token target tops out around 0.25. Dropped
+  counts are recorded per chunk.
+- **Scored tokens:** always the article's original token IDs, never
+  re-tokenized text, so every arm scores the same tokens and bytes.
+- **Correctness check:** `--arm rag --k 0` must reproduce `--arm none` chunk
+  for chunk. It did, to within 1.8e-4 nats per 64-token chunk in float32 on 5
+  articles.
+
 ## Metric
 
-Sum the loss over every scored token, across all windows and articles:
+The full derivation, with a worked example, is in
+[`protocol_b_math.md`](protocol_b_math.md). In short, sum the loss over every
+scored token, across all windows and articles:
 
 - **bits-per-byte (bpb)**, the main number:
   total loss in nats ÷ (ln 2 × UTF-8 bytes of all scored text).

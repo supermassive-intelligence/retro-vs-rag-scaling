@@ -184,6 +184,11 @@ the same device.
 # held-out eval set: articles created after the 2023-11-01 dump
 .venv/bin/python -m scripts.build_heldout_eval --n-articles 1000 --out data/eval/wiki_postdump
 
+# Protocol B language-modeling eval (bpb); --arm none | rag
+.venv/bin/python -m scripts.eval_lm --arm rag --index data/wiki_index/wikipedia_1k \
+  --model <hf-model> --eval data/eval/wiki_postdump --out data/lm_eval/<model>/rag_wikipedia_1k
+# smoke run: add --max-articles 5; correctness: --arm rag --k 0 must equal --arm none
+
 # top-k retrieval; queries.jsonl has {"id": ..., "query": ...} per line
 .venv/bin/python -m scripts.retrieve --index data/wiki_index/wikipedia_1k \
   --queries data/retrieval/queries/<set>.jsonl --k 5 --device cuda \
@@ -200,6 +205,10 @@ The language-modeling protocol is in [`docs/eval_protocol.md`](docs/eval_protoco
   2023-11-01 dump.
 
 Read the doc before changing anything in the evaluation.
+
+The current language model for both arms is `Qwen/Qwen2.5-7B-Instruct` (the
+user's choice). The GCCA arm must use the same base model, or the arms aren't
+comparable.
 
 ## Retrieval (RAG arm)
 
@@ -270,8 +279,13 @@ scripts/build_wiki_index.py   Wikipedia -> 64-token chunks -> FAISS index
 scripts/retrieve.py           queries -> dense exact top-k chunks
 scripts/provenance.py         git SHA / file-hash helpers for manifests
 scripts/build_heldout_eval.py post-dump Wikipedia articles -> held-out eval set
+scripts/eval_lm.py            Protocol B eval: bpb/ppl for --arm none | rag
+data/lm_eval/<model>/<arm>/   eval runs: windows.jsonl + summary.json (on blackwell-maxq-0 only)
+verification/                 internal checks against published numbers (see its README)
+data/verification/            verification outputs (on blackwell-maxq-0 only)
 docs/eval_protocol.md         evaluation protocol (Protocol B), metric, held-out text
 docs/heldout_eval_set.md      how the held-out eval set was built, its stats and checks
+docs/protocol_b_math.md       Protocol B math: scored tokens, conditioning, loss, bpb, ppl
 data/eval/wiki_postdump/      held-out eval articles (on blackwell-maxq-0 only)
 data/wiki_index/wikipedia_*/  built indexes (gitignored; on blackwell-maxq-0 only)
 data/wiki_index/logs/         build logs (on blackwell-maxq-0 only)
