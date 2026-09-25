@@ -180,6 +180,39 @@ using the venv interpreter. Scripts run as modules from the repo root:
 Both indexes are built on `blackwell-maxq-0`, so their embeddings come from
 the same device.
 
+```bash
+# top-k retrieval; queries.jsonl has {"id": ..., "query": ...} per line
+.venv/bin/python -m scripts.retrieve --index data/wiki_index/wikipedia_1k \
+  --queries data/retrieval/queries/<set>.jsonl --k 5 --device cuda \
+  --out data/retrieval/wikipedia_1k/<set>
+```
+
+## Retrieval (RAG arm)
+
+`scripts/retrieve.py` implements the basic retriever from DPR (Karpukhin et
+al. 2020) and RAG (Lewis et al. 2020):
+- Embed the query with the same bi-encoder that embedded the chunks. The
+  script reads the encoder name from the index manifest, so the two can't
+  diverge.
+- Run exact maximum-inner-product search (brute force, FAISS `IndexFlatIP`)
+  and return the top k. There is no reranking, approximate search or query
+  rewriting.
+- Settings follow the papers and maailma:
+  - `k` defaults to 5; RAG tuned `k` ∈ {5, 10}.
+  - `--query-prefix` defaults to `""`, matching maailma's setting for this
+    encoder.
+  - Keep both fixed across index sizes, so that only corpus size varies.
+- Each run writes `results.jsonl` (ranked hits with chunk text) and a
+  `manifest.json` (command, git SHA, index hashes, k, prefix, query-set
+  hash, search time).
+- The sparse alternative is BM25, used by In-Context RALM (Ram et al. 2023),
+  where it beat dense retrievers at language modeling with a frozen LM. It
+  isn't implemented; it's the natural control arm if the dense results look
+  odd.
+- Sanity check performed at `5075fa8` (dirty tree): 200 random
+  `wikipedia_1k` chunks used as queries each returned themselves at rank 1
+  on both `wikipedia_1k` and `wikipedia_100k`.
+
 ## Corpus and index
 
 - The X axis of every scaling plot is **number of source Wikipedia articles**
@@ -191,6 +224,17 @@ the same device.
   tokenizer, non-overlapping 64-token windows, trailing partial chunk kept.
   Embeddings use `BAAI/bge-small-en-v1.5` (maailma's default encoder),
   L2-normalized, in an exact `IndexFlatIP`.
+- **Pooling is CLS, on purpose.** This is BGE's trained pooling, as its
+  `sentence-transformers` config specifies, with a 512-token limit. It
+  deliberately differs from maailma's `TextEncoder`, which mean-pools and
+  truncates to 64 tokens:
+  - 25% of our chunks exceed 64 BGE tokens.
+  - For 300 chunk queries on `wikipedia_1k`, the two methods agree on the
+    top hit 75% of the time and share 82% of their top-10 results.
+
+  The GCCA arm must retrieve with these same CLS embeddings, not maailma's
+  encoder. Otherwise retrieval differs between arms and confounds the
+  comparison.
 - Indexes are named `wikipedia_<size>` (`wikipedia_1k`, `wikipedia_100k`)
   under `data/wiki_index/`. Each holds `chunks.jsonl`, `index.faiss` and
   `manifest.json`. `data/` is gitignored. The manifest records the command,
@@ -209,8 +253,12 @@ the same device.
 
 ```
 scripts/build_wiki_index.py   Wikipedia -> 64-token chunks -> FAISS index
+scripts/retrieve.py           queries -> dense exact top-k chunks
+scripts/provenance.py         git SHA / file-hash helpers for manifests
 data/wiki_index/wikipedia_*/  built indexes (gitignored; on blackwell-maxq-0 only)
 data/wiki_index/logs/         build logs (on blackwell-maxq-0 only)
+data/retrieval/queries/       query sets (JSONL)
+data/retrieval/<index>/<set>/ retrieval runs: results.jsonl + manifest.json
 ```
 
 Keep this section in step with the real layout, and update it in the same

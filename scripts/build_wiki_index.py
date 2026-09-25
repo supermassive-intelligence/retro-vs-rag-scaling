@@ -12,10 +12,8 @@ the RAG baseline and the GCCA arm.
 from __future__ import annotations
 
 import argparse
-import hashlib
 import json
 import logging
-import subprocess
 import sys
 import time
 from pathlib import Path
@@ -26,6 +24,8 @@ from datasets import load_dataset
 from sentence_transformers import SentenceTransformer
 from tqdm import tqdm
 from transformers import AutoTokenizer
+
+from scripts.provenance import git_state, sha256_file
 
 log = logging.getLogger("build_wiki_index")
 
@@ -50,23 +50,6 @@ def parse_args() -> argparse.Namespace:
 def chunk_document(text: str, tokenizer, m: int) -> list[tuple[str, int]]:
     ids = tokenizer(text, add_special_tokens=False)["input_ids"]
     return [(tokenizer.decode(ids[s : s + m], skip_special_tokens=True), len(ids[s : s + m])) for s in range(0, len(ids), m)]
-
-
-def git_state() -> dict[str, str | bool | None]:
-    try:
-        sha = subprocess.run(["git", "rev-parse", "HEAD"], capture_output=True, text=True, check=True).stdout.strip()
-        dirty = bool(subprocess.run(["git", "status", "--porcelain"], capture_output=True, text=True, check=True).stdout.strip())
-        return {"sha": sha, "dirty": dirty}
-    except (subprocess.CalledProcessError, FileNotFoundError):
-        return {"sha": None, "dirty": None}
-
-
-def sha256_file(path: Path) -> str:
-    h = hashlib.sha256()
-    with path.open("rb") as f:
-        for block in iter(lambda: f.read(1 << 20), b""):
-            h.update(block)
-    return h.hexdigest()
 
 
 def main() -> None:
