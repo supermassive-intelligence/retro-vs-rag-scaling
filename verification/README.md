@@ -52,5 +52,37 @@ than its 7.46 on WikiText-2. The two setups differ in several ways:
 So a lower perplexity on our set doesn't point to an error. The WikiText check
 above is the one that validates the code.
 
+## Retrieval quality (`retrieval_quality.py`)
+
+Checks that dense retrieval finds related text, using relations the index
+already knows as ground truth. Chunk queries reuse the stored chunk vectors;
+title queries are encoded with the index's own encoder. Each recall is shown
+next to what random retrieval would get.
+
+```bash
+python -m verification.retrieval_quality --index data/wiki_index/wikipedia_1k \
+  --out data/verification/retrieval_quality_wikipedia_1k.json
+```
+
+**Result, 2026-09-25**
+
+- **Index:** `wikipedia_1k` (11,251 vectors, 1,000 articles).
+- **Queries:** 1,000 per task, seed 0, CPU.
+
+| Task | Recall@1 | Recall@4 | Recall@10 | Random @4 |
+|---|---|---|---|---|
+| Same article: another chunk of the query's article | 88.4% | 95.7% | 98.0% | 4.3% |
+| Next chunk: the exact following chunk | 13.4% | 36.4% | 53.6% | 0.04% |
+| Title: the article's title finds one of its chunks | 99.2% | 99.6% | 99.7% | 0.4% |
+
+Retrieval works: every task is far above random. For reference, maailma
+reports next-chunk recall of 25.6% at k = 4 for the same encoder, but with
+mean pooling on a different corpus. The title task is easy here with only
+1,000 articles to choose between.
+
+This rules out a broken retriever as the reason RAG doesn't help on the
+held-out set. When related text is in the index, it comes back. The held-out
+articles cover post-2023 topics, which the indexes rarely contain.
+
 A first attempt at the 7B check on GPU 3 ran out of memory while sharing the
 GPU with the main RAG run (log: `data/verification/wikitext2.oom-gpu3.log`).

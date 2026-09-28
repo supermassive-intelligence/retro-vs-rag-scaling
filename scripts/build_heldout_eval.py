@@ -123,6 +123,7 @@ def main() -> None:
     logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s")
     logging.getLogger("httpx").setLevel(logging.WARNING)
     started = time.time()
+    git = git_state()  # at start: the tree can change while a long run is going
 
     old_files = parquet_files(args.old_repo, args.old_revision, args.old_glob)
     old_max_id, old_rows = max_page_id(old_files)
@@ -168,7 +169,7 @@ def main() -> None:
     created = sorted(r["created"] for r in kept)
     manifest = {
         "command": " ".join([sys.executable, "-m", "scripts.build_heldout_eval", *sys.argv[1:]]),
-        "git": git_state(),
+        "git": git,
         "datastore_dump": {"repo": args.old_repo, "revision": args.old_revision, "files": args.old_glob,
                            "n_articles": old_rows, "max_page_id": old_max_id},
         "source": {"repo": args.new_repo, "revision": args.new_revision, "files": args.new_glob, **scan},

@@ -125,6 +125,7 @@ def main() -> None:
     logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s")
     logging.getLogger("httpx").setLevel(logging.WARNING)
     started = time.time()
+    git = git_state()  # at start: the tree can change while a long run is going
 
     tokenizer = AutoTokenizer.from_pretrained(args.model)
     pad_id = tokenizer.pad_token_id if tokenizer.pad_token_id is not None else tokenizer.eos_token_id
@@ -229,7 +230,7 @@ def main() -> None:
     eval_manifest = args.eval / "manifest.json"
     summary = {
         "command": " ".join([sys.executable, "-m", "scripts.eval_lm", *sys.argv[1:]]),
-        "git": git_state(),
+        "git": git,
         "code_sha256": {"scripts/eval_lm.py": sha256_file(Path(__file__))},
         "arm": args.arm,
         "model": {"name": args.model, "revision": getattr(scorer.model.config, "_commit_hash", None), "dtype": args.dtype},

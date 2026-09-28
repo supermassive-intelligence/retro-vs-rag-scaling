@@ -40,6 +40,7 @@ def main() -> None:
     p.add_argument("--batch-size", type=int, default=4)
     p.add_argument("--out", type=Path, required=True)
     args = p.parse_args()
+    git = git_state()  # at start: the tree can change while a long run is going
     logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s")
     logging.getLogger("httpx").setLevel(logging.WARNING)
 
@@ -69,7 +70,7 @@ def main() -> None:
     args.out.parent.mkdir(parents=True, exist_ok=True)
     args.out.write_text(json.dumps({
         "command": " ".join([sys.executable, "-m", "verification.wikitext_ppl", *sys.argv[1:]]),
-        "git": git_state(),
+        "git": git,
         "code_sha256": {"verification/wikitext_ppl.py": sha256_file(Path(__file__)),
                         "scripts/eval_lm.py": sha256_file(Path(__file__).parents[1] / "scripts" / "eval_lm.py")},
         "dataset": "Salesforce/wikitext wikitext-2-raw-v1 test",

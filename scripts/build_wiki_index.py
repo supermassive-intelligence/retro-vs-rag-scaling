@@ -59,6 +59,7 @@ def main() -> None:
     out = args.out or Path("data/wiki_index") / f"n{args.n_docs}"
     out.mkdir(parents=True, exist_ok=True)
     started = time.time()
+    git = git_state()  # at start: the tree can change while a long run is going
 
     tokenizer = AutoTokenizer.from_pretrained(args.tokenizer)
 
@@ -109,7 +110,7 @@ def main() -> None:
 
     manifest = {
         "command": " ".join([sys.executable, "-m", "scripts.build_wiki_index", *sys.argv[1:]]),
-        "git": git_state(),
+        "git": git,
         "dataset": {"name": DATASET, "config": args.dataset_config, "split": "train"},
         "sampling": {"seed": args.seed, "shuffle_buffer": args.shuffle_buffer, "n_docs_requested": args.n_docs, "n_docs": n_docs},
         "chunking": {"tokenizer": args.tokenizer, "chunk_size": args.chunk_size, "n_chunks": len(texts), "n_tokens": n_tokens},

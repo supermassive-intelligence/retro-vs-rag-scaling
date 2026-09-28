@@ -76,6 +76,7 @@ def main() -> None:
     logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s")
     logging.getLogger("httpx").setLevel(logging.WARNING)
     started = time.time()
+    git = git_state()  # at start: the tree can change while a long run is going
 
     index_manifest_path = args.index / "manifest.json"
     index_manifest = json.loads(index_manifest_path.read_text())
@@ -112,7 +113,7 @@ def main() -> None:
     query_blob = json.dumps(queries, sort_keys=True).encode()
     manifest = {
         "command": " ".join([sys.executable, "-m", "scripts.retrieve", *sys.argv[1:]]),
-        "git": git_state(),
+        "git": git,
         "index": {
             "path": str(args.index),
             "manifest_sha256": sha256_file(index_manifest_path),
