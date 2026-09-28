@@ -217,9 +217,19 @@ al. 2020) and RAG (Lewis et al. 2020):
 - Embed the query with the same bi-encoder that embedded the chunks. The
   script reads the encoder name from the index manifest, so the two can't
   diverge.
-- Run exact maximum-inner-product search (brute force, FAISS `IndexFlatIP`)
-  and return the top k. There is no reranking, approximate search or query
-  rewriting.
+- Run exact maximum-inner-product search and return the top k. There is no
+  reranking, approximate search or query rewriting.
+- **Search runs on the GPU** (`scripts/exact_search.py`, used by `retrieve.py`
+  and `eval_lm.py`):
+  - The index's vectors are loaded from `index.faiss` onto the GPU.
+  - Scoring is a float32 matrix multiply plus top-k in PyTorch, with TF32
+    off, working through the database in blocks with a running top-k.
+  - It stays exact: approximate search (HNSW, IVF, PQ) would make recall
+    error a hidden variable in the scaling study.
+  - Checked against FAISS `IndexFlatIP` on `wikipedia_100k` (5,000 queries,
+    k = 16; `verification/exact_search_equivalence.py`): the same top-1 in
+    99.9% of queries, and every differing position was a float32 near-tie
+    (score gap ≤ 6e-7). It was about 400× faster: 0.18 s against 75 s.
 - Settings follow the papers and maailma:
   - `k` defaults to 5; RAG tuned `k` ∈ {5, 10}.
   - `--query-prefix` defaults to `""`, matching maailma's setting for this
@@ -246,7 +256,8 @@ al. 2020) and RAG (Lewis et al. 2020):
 - Chunking matches `../maailma`'s `ingestion.chunk_document`: Qwen2.5
   tokenizer, non-overlapping 64-token windows, trailing partial chunk kept.
   Embeddings use `BAAI/bge-small-en-v1.5` (maailma's default encoder),
-  L2-normalized, in an exact `IndexFlatIP`.
+  L2-normalized, and stored in a FAISS `IndexFlatIP` file. Search loads
+  those vectors onto the GPU (see Retrieval above).
 - **Pooling is CLS, on purpose.** This is BGE's trained pooling, as its
   `sentence-transformers` config specifies, with a 512-token limit. It
   deliberately differs from maailma's `TextEncoder`, which mean-pools and
@@ -277,6 +288,7 @@ al. 2020) and RAG (Lewis et al. 2020):
 ```
 scripts/build_wiki_index.py   Wikipedia -> 64-token chunks -> FAISS index
 scripts/retrieve.py           queries -> dense exact top-k chunks
+scripts/exact_search.py       exact top-k on the GPU over an index.faiss's vectors
 scripts/provenance.py         git SHA / file-hash helpers for manifests
 scripts/build_heldout_eval.py post-dump Wikipedia articles -> held-out eval set
 scripts/eval_lm.py            Protocol B eval: bpb/ppl for --arm none | rag

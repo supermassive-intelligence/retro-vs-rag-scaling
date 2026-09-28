@@ -2,8 +2,8 @@
 
 The basic retriever of DPR (Karpukhin et al. 2020) and RAG (Lewis et al.
 2020): embed the query with the same bi-encoder that embedded the chunks, then
-run exact maximum-inner-product search (brute force, FAISS IndexFlatIP) for
-the top k. No reranking, no approximate search, no query rewriting.
+run exact maximum-inner-product search (brute force over every vector, on the
+GPU via scripts/exact_search.py) for the top k. No reranking, no approximate search, no query rewriting.
 
 The query encoder is read from the index manifest, so queries and chunks can
 never be embedded by different models.
@@ -24,9 +24,9 @@ import sys
 import time
 from pathlib import Path
 
-import faiss
 from sentence_transformers import SentenceTransformer
 
+from scripts.exact_search import METHOD, ExactIndex
 from scripts.provenance import git_state, sha256_file
 
 log = logging.getLogger("retrieve")
@@ -91,11 +91,11 @@ def main() -> None:
         convert_to_numpy=True,
     )
 
-    index = faiss.read_index(str(args.index / "index.faiss"))
-    assert index.d == q_emb.shape[1], f"index dim {index.d} != query dim {q_emb.shape[1]}"
+    index = ExactIndex(args.index / "index.faiss", device=str(encoder.device))
     t0 = time.time()
     scores, ids = index.search(q_emb, args.k)
     search_s = time.time() - t0
+    index.close()
 
     chunks = load_chunks(args.index / "chunks.jsonl", {int(i) for i in ids.flatten() if i >= 0})
 
@@ -122,11 +122,11 @@ def main() -> None:
             "n_vectors": index_manifest["index"]["n_vectors"],
         },
         "retrieval": {
-            "method": "dense exact MIPS (FAISS IndexFlatIP, cosine on L2-normalized vectors)",
+            "method": f"dense {METHOD}, cosine on L2-normalized vectors",
             "encoder": index_manifest["embedding"]["model"],
             "query_prefix": args.query_prefix,
             "k": args.k,
-            "device": str(encoder.device),
+            "device": str(index.device),
         },
         "queries": {"n": len(queries), "sha256": hashlib.sha256(query_blob).hexdigest(), "source": str(args.queries) if args.queries else None},
         "files": {"results.jsonl": sha256_file(results_path)},

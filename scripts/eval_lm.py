@@ -25,13 +25,13 @@ import sys
 import time
 from pathlib import Path
 
-import faiss
 import numpy as np
 import torch
 import transformers
 from sentence_transformers import SentenceTransformer
 from transformers import AutoModelForCausalLM, AutoTokenizer
 
+from scripts.exact_search import METHOD, ExactIndex
 from scripts.provenance import git_state, sha256_file
 
 log = logging.getLogger("eval_lm")
@@ -161,11 +161,12 @@ def main() -> None:
         encoder = SentenceTransformer(index_manifest["embedding"]["model"], device="cuda")
         q_emb = encoder.encode(queries, batch_size=512, normalize_embeddings=True, convert_to_numpy=True)
         del encoder
-        index = faiss.read_index(str(args.index / "index.faiss"))
-        assert index.d == q_emb.shape[1]
+        index = ExactIndex(args.index / "index.faiss", device="cuda")
         t0 = time.time()
         _, ids = index.search(q_emb, args.search_depth)
-        log.info("retrieved %d queries x %d in %.1fs", len(queries), args.search_depth, time.time() - t0)
+        search_s = time.time() - t0
+        index.close()  # free the vectors before the language model loads
+        log.info("retrieved %d queries x %d in %.1fs", len(queries), args.search_depth, search_s)
         neighbors = {key: [int(c) for c in row if c >= 0] for key, row in zip(keys, ids)}
         store = NeighborStore(args.index, tokenizer, args.neighbor_span, chunk_size)
 
@@ -244,6 +245,8 @@ def main() -> None:
             "index_n_docs": index_manifest["sampling"]["n_docs"],
             "index_n_vectors": index_manifest["index"]["n_vectors"],
             "encoder": index_manifest["embedding"]["model"],
+            "search": METHOD,
+            "search_s": round(search_s, 2),
             "k": args.k, "neighbor_span": args.neighbor_span, "search_depth": args.search_depth,
             "spans_used": sum(len(x) for r in records for x in r["retrieved"]),
             "spans_dropped_leak": sum(sum(r["dropped"]) for r in records),
