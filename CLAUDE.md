@@ -181,6 +181,12 @@ Both indexes are built on `blackwell-maxq-0`, so their embeddings come from
 the same device.
 
 ```bash
+# unseen datastore: articles created on/after 2024-10-01 (after Qwen2.5's release),
+# from the 2026-03 snapshot, with every held-out eval article excluded
+.venv/bin/python -m scripts.build_unseen_index --n-docs 10000 --out data/wiki_index/wikipedia_unseen_10k --device cuda
+```
+
+```bash
 # held-out eval set: articles created after the 2023-11-01 dump
 .venv/bin/python -m scripts.build_heldout_eval --n-articles 1000 --out data/eval/wiki_postdump
 
@@ -285,6 +291,12 @@ al. 2020) and RAG (Lewis et al. 2020):
   The GCCA arm must retrieve with these same CLS embeddings, not maailma's
   encoder. Otherwise retrieval differs between arms and confounds the
   comparison.
+- **Unseen datastore** (`wikipedia_unseen_<size>`): articles from
+  `omarkamali/wikipedia-monthly` `20260301.en` whose page ID is at least that
+  of the first held-out eval article created on or after 2024-10-01, so all
+  were created after Qwen2.5's release. All 1,000 held-out eval articles are
+  excluded by ID and title. Chunking and embedding share
+  `build_wiki_index.index_documents`. One seeded shuffle makes the sizes nested.
 - Indexes are named `wikipedia_<size>` (`wikipedia_1k`, `wikipedia_100k`)
   under `data/wiki_index/`. Each holds `chunks.jsonl`, `index.faiss` and
   `manifest.json`. `data/` is gitignored. The manifest records the command,
@@ -303,6 +315,7 @@ al. 2020) and RAG (Lewis et al. 2020):
 
 ```
 scripts/build_wiki_index.py   Wikipedia -> 64-token chunks -> FAISS index
+scripts/build_unseen_index.py post-2024-10 Wikipedia articles -> index (same chunking/embedding)
 scripts/retrieve.py           queries -> dense exact top-k chunks
 scripts/exact_search.py       exact top-k on the GPU over an index.faiss's vectors
 scripts/provenance.py         git SHA / file-hash helpers for manifests

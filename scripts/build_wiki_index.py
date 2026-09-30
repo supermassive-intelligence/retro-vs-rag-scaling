@@ -52,27 +52,18 @@ def chunk_document(text: str, tokenizer, m: int) -> list[tuple[str, int]]:
     return [(tokenizer.decode(ids[s : s + m], skip_special_tokens=True), len(ids[s : s + m])) for s in range(0, len(ids), m)]
 
 
-def main() -> None:
-    args = parse_args()
-    logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s")
-    logging.getLogger("httpx").setLevel(logging.WARNING)
-    out = args.out or Path("data/wiki_index") / f"n{args.n_docs}"
-    out.mkdir(parents=True, exist_ok=True)
-    started = time.time()
-    git = git_state()  # at start: the tree can change while a long run is going
+def index_documents(docs, out: Path, args: argparse.Namespace, total: int | None = None) -> dict:
+    """Chunk, embed and index ``docs`` (dicts with id, title, text) into ``out``; the manifest's index fields.
 
+    Shared by every index builder, so indexes from different sources are chunked and embedded identically.
+    """
     tokenizer = AutoTokenizer.from_pretrained(args.tokenizer)
-
-    # Streaming shuffle is buffer-based: deterministic for a fixed (seed, buffer), not uniform over all of Wikipedia.
-    ds = load_dataset(DATASET, args.dataset_config, split="train", streaming=True)
-    ds = ds.shuffle(seed=args.seed, buffer_size=args.shuffle_buffer).take(args.n_docs)
-
     chunks_path = out / "chunks.jsonl"
     texts: list[str] = []
     n_docs = 0
     n_tokens = 0
     with chunks_path.open("w") as f:
-        for doc in tqdm(ds, total=args.n_docs, desc="chunking"):
+        for doc in tqdm(docs, total=total, desc="chunking"):
             n_docs += 1
             for pos, (text, n_tok) in enumerate(chunk_document(doc["text"], tokenizer, args.chunk_size)):
                 if not text.strip():
@@ -88,9 +79,6 @@ def main() -> None:
                 f.write(json.dumps(rec, ensure_ascii=False) + "\n")
                 texts.append(text)
                 n_tokens += n_tok
-
-    if n_docs < args.n_docs:
-        log.warning("dataset exhausted: got %d of %d requested docs", n_docs, args.n_docs)
     log.info("%d docs -> %d chunks, %d tokens", n_docs, len(texts), n_tokens)
 
     encoder = SentenceTransformer(args.embedding_model, device=args.device)
@@ -107,16 +95,39 @@ def main() -> None:
     index.add(emb)
     index_path = out / "index.faiss"
     faiss.write_index(index, str(index_path))
+    return {
+        "n_docs": n_docs,
+        "chunking": {"tokenizer": args.tokenizer, "chunk_size": args.chunk_size, "n_chunks": len(texts), "n_tokens": n_tokens},
+        "embedding": {"model": args.embedding_model, "dim": int(emb.shape[1]), "normalized": True, "device": str(encoder.device)},
+        "index": {"type": "IndexFlatIP", "n_vectors": int(index.ntotal)},
+        "files": {"chunks.jsonl": sha256_file(chunks_path), "index.faiss": sha256_file(index_path)},
+    }
+
+
+def main() -> None:
+    args = parse_args()
+    logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s")
+    logging.getLogger("httpx").setLevel(logging.WARNING)
+    out = args.out or Path("data/wiki_index") / f"n{args.n_docs}"
+    out.mkdir(parents=True, exist_ok=True)
+    started = time.time()
+    git = git_state()  # at start: the tree can change while a long run is going
+
+    # Streaming shuffle is buffer-based: deterministic for a fixed (seed, buffer), not uniform over all of Wikipedia.
+    ds = load_dataset(DATASET, args.dataset_config, split="train", streaming=True)
+    ds = ds.shuffle(seed=args.seed, buffer_size=args.shuffle_buffer).take(args.n_docs)
+
+    stats = index_documents(ds, out, args, total=args.n_docs)
+    n_docs = stats.pop("n_docs")
+    if n_docs < args.n_docs:
+        log.warning("dataset exhausted: got %d of %d requested docs", n_docs, args.n_docs)
 
     manifest = {
         "command": " ".join([sys.executable, "-m", "scripts.build_wiki_index", *sys.argv[1:]]),
         "git": git,
         "dataset": {"name": DATASET, "config": args.dataset_config, "split": "train"},
         "sampling": {"seed": args.seed, "shuffle_buffer": args.shuffle_buffer, "n_docs_requested": args.n_docs, "n_docs": n_docs},
-        "chunking": {"tokenizer": args.tokenizer, "chunk_size": args.chunk_size, "n_chunks": len(texts), "n_tokens": n_tokens},
-        "embedding": {"model": args.embedding_model, "dim": int(emb.shape[1]), "normalized": True, "device": str(encoder.device)},
-        "index": {"type": "IndexFlatIP", "n_vectors": int(index.ntotal)},
-        "files": {"chunks.jsonl": sha256_file(chunks_path), "index.faiss": sha256_file(index_path)},
+        **stats,
         "elapsed_s": round(time.time() - started, 1),
     }
     (out / "manifest.json").write_text(json.dumps(manifest, indent=2) + "\n")
