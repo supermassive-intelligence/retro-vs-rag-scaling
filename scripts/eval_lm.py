@@ -8,6 +8,13 @@ are scored, so every scored token is scored exactly once.
     --arm rag    For each Ti, retrieve with T(i-1), prepend the neighbors, and
                  score Ti in its own forward pass.
 
+Controls for the rag arm:
+    --neighbors random   uniformly random chunks instead of the dense top-k, with
+                         the same filter and layout: the cost of inserting text
+                         that carries no information about the target.
+    --leak-ngram 0       no leakage filter. On text that is in the index this
+                         hands the model the target itself: a sanity ceiling.
+
     python -m scripts.eval_lm --arm none --model Qwen/Qwen2.5-0.5B-Instruct \\
         --eval data/eval/wiki_postdump --out data/lm_eval/<model>/none
     python -m scripts.eval_lm --arm rag --index data/wiki_index/wikipedia_1k \\
@@ -38,7 +45,6 @@ log = logging.getLogger("eval_lm")
 
 WINDOW = 1024
 TARGET = 512
-LEAK_NGRAM = 32
 
 
 def parse_args() -> argparse.Namespace:
@@ -51,6 +57,10 @@ def parse_args() -> argparse.Namespace:
     p.add_argument("--k", type=int, default=4, help="neighbors prepended per scored chunk")
     p.add_argument("--neighbor-span", choices=["chunk", "chunk+next"], default="chunk+next")
     p.add_argument("--search-depth", type=int, default=16, help="candidates retrieved before the leakage filter")
+    p.add_argument("--neighbors", choices=["dense", "random"], default="dense")
+    p.add_argument("--seed", type=int, default=0, help="for --neighbors random")
+    p.add_argument("--leak-ngram", type=int, default=32,
+                   help="drop neighbors sharing an n-gram this long with the window's target; 0 = no filter")
     p.add_argument("--max-articles", type=int, default=None, help="first N articles only (smoke runs)")
     p.add_argument("--batch-size", type=int, default=16, help="sequences per forward pass")
     p.add_argument("--dtype", choices=["bfloat16", "float32"], default="bfloat16")
@@ -158,15 +168,21 @@ def main() -> None:
                 c = s + TARGET + i * chunk_size
                 keys.append((wi, i))
                 queries.append(tokenizer.decode(tokens[ai][c - chunk_size : c]))
-        encoder = SentenceTransformer(index_manifest["embedding"]["model"], device="cuda")
-        q_emb = encoder.encode(queries, batch_size=512, normalize_embeddings=True, convert_to_numpy=True)
-        del encoder
-        index = ExactIndex(args.index / "index.faiss", device="cuda")
         t0 = time.time()
-        _, ids = index.search(q_emb, args.search_depth)
+        if args.neighbors == "dense":
+            encoder = SentenceTransformer(index_manifest["embedding"]["model"], device="cuda")
+            q_emb = encoder.encode(queries, batch_size=512, normalize_embeddings=True, convert_to_numpy=True)
+            del encoder
+            index = ExactIndex(args.index / "index.faiss", device="cuda")
+            t0 = time.time()
+            _, ids = index.search(q_emb, args.search_depth)
+            index.close()  # free the vectors before the language model loads
+        else:
+            rng = np.random.default_rng(args.seed)
+            n_vectors = index_manifest["index"]["n_vectors"]
+            ids = [rng.choice(n_vectors, size=args.search_depth, replace=False) for _ in queries]
         search_s = time.time() - t0
-        index.close()  # free the vectors before the language model loads
-        log.info("retrieved %d queries x %d in %.1fs", len(queries), args.search_depth, search_s)
+        log.info("retrieved %d queries x %d (%s) in %.1fs", len(queries), args.search_depth, args.neighbors, search_s)
         neighbors = {key: [int(c) for c in row if c >= 0] for key, row in zip(keys, ids)}
         store = NeighborStore(args.index, tokenizer, args.neighbor_span, chunk_size)
 
@@ -187,14 +203,14 @@ def main() -> None:
         if args.arm == "none":
             jobs.append((wi, None, ids[s : s + WINDOW], TARGET))
         else:
-            leak = ngrams(target, LEAK_NGRAM)
+            leak = ngrams(target, args.leak_ngram) if args.leak_ngram else set()
             rec["retrieved"], rec["dropped"] = [], []
             for i in range(n_chunks):
                 kept, dropped = [], 0
                 for cid in neighbors[(wi, i)]:
                     if len(kept) == args.k:
                         break
-                    if ngrams(store.tokens(cid), LEAK_NGRAM) & leak:
+                    if leak and ngrams(store.tokens(cid), args.leak_ngram) & leak:
                         dropped += 1
                         continue
                     kept.append(cid)
@@ -238,14 +254,15 @@ def main() -> None:
         "eval": {"path": str(args.eval), "manifest_sha256": sha256_file(eval_manifest),
                  "articles_sha256": json.loads(eval_manifest.read_text())["files"]["articles.jsonl"],
                  "n_articles": len(articles), "max_articles": args.max_articles},
-        "protocol": {"window": WINDOW, "target": TARGET, "chunk_size": chunk_size, "leak_ngram": LEAK_NGRAM},
+        "protocol": {"window": WINDOW, "target": TARGET, "chunk_size": chunk_size, "leak_ngram": args.leak_ngram},
         "retrieval": None if args.arm == "none" else {
             "index": str(args.index),
             "index_faiss_sha256": index_manifest["files"]["index.faiss"],
             "index_n_docs": index_manifest["sampling"]["n_docs"],
             "index_n_vectors": index_manifest["index"]["n_vectors"],
             "encoder": index_manifest["embedding"]["model"],
-            "search": METHOD,
+            "neighbors": args.neighbors,
+            "search": METHOD if args.neighbors == "dense" else f"uniform random chunks, seed {args.seed}",
             "search_s": round(search_s, 2),
             "k": args.k, "neighbor_span": args.neighbor_span, "search_depth": args.search_depth,
             "spans_used": sum(len(x) for r in records for x in r["retrieved"]),

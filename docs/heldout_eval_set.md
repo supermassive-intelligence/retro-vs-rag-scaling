@@ -13,6 +13,10 @@ none of them can appear in any index. This is the text Protocol B is scored on
 - **Deterministic:** an earlier build from `6fead9e` with uncommitted changes
   produced a byte-identical file, with the same rejections.
 
+**Current runs use the first 500 articles** (`eval_lm --max-articles 500`).
+The builder keeps articles in shuffle order and stops at `--n-articles`, so
+the first 500 lines are exactly what `--n-articles 500` would build.
+
 ## Why post-dump articles
 
 The indexes come from Wikipedia as of **2023-11-01**. If we evaluated on

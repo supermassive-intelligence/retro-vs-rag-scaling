@@ -188,6 +188,15 @@ the same device.
 .venv/bin/python -m scripts.eval_lm --arm rag --index data/wiki_index/wikipedia_1k \
   --model <hf-model> --eval data/eval/wiki_postdump --out data/lm_eval/<model>/rag_wikipedia_1k
 # smoke run: add --max-articles 5; correctness: --arm rag --k 0 must equal --arm none
+# controls: --neighbors random (random chunks, same layout); --leak-ngram 0 (no leakage filter)
+
+# positive-control eval set: articles in wikipedia_100k but not wikipedia_1k
+.venv/bin/python -m scripts.build_indump_eval --index data/wiki_index/wikipedia_100k \
+  --exclude-index data/wiki_index/wikipedia_1k --n-articles 500 --out data/eval/wiki_indump
+
+# paired bootstrap CIs on bpb differences between runs on the same eval set
+.venv/bin/python -m scripts.bootstrap_ci --base <none run dir> --run <rag run dir> ... \
+  --out data/analysis/<name>.json
 
 # top-k retrieval; queries.jsonl has {"id": ..., "query": ...} per line
 .venv/bin/python -m scripts.retrieve --index data/wiki_index/wikipedia_1k \
@@ -208,7 +217,14 @@ Read the doc before changing anything in the evaluation.
 
 The current language model for both arms is `Qwen/Qwen2.5-7B-Instruct` (the
 user's choice). The GCCA arm must use the same base model, or the arms aren't
-comparable.
+comparable. 14B runs are off for now.
+
+Current runs score the **first 500** of the 1,000 held-out articles
+(`--max-articles 500`). This is exactly the set `build_heldout_eval
+--n-articles 500` would produce: the builder walks the same seeded shuffle and
+stops once it has kept n articles. Numbers on 500 articles are not comparable
+to the earlier 1,000-article runs; compare arms only within one eval size.
+Outputs go to `data/lm_eval/<commit>/eval500/<model>/<arm>/`.
 
 ## Retrieval (RAG arm)
 
@@ -292,12 +308,17 @@ scripts/exact_search.py       exact top-k on the GPU over an index.faiss's vecto
 scripts/provenance.py         git SHA / file-hash helpers for manifests
 scripts/build_heldout_eval.py post-dump Wikipedia articles -> held-out eval set
 scripts/eval_lm.py            Protocol B eval: bpb/ppl for --arm none | rag
+scripts/build_indump_eval.py  in-index articles -> positive-control eval set
+scripts/bootstrap_ci.py       paired bootstrap CIs on bpb differences between runs
+data/analysis/                bootstrap and other post-hoc analyses (on blackwell-maxq-0 only)
 data/lm_eval/<model>/<arm>/   eval runs: windows.jsonl + summary.json (on blackwell-maxq-0 only)
 verification/                 internal checks against published numbers (see its README)
 data/verification/            verification outputs (on blackwell-maxq-0 only)
 docs/eval_protocol.md         evaluation protocol (Protocol B), metric, held-out text
 docs/heldout_eval_set.md      how the held-out eval set was built, its stats and checks
 docs/protocol_b_math.md       Protocol B math: scored tokens, conditioning, loss, bpb, ppl
+docs/findings.md              results so far, their provenance, and what the plots still need
+docs/retrieval_metrics.md     how search exactness and retrieval recall are computed
 data/eval/wiki_postdump/      held-out eval articles (on blackwell-maxq-0 only)
 data/wiki_index/wikipedia_*/  built indexes (gitignored; on blackwell-maxq-0 only)
 data/wiki_index/logs/         build logs (on blackwell-maxq-0 only)
