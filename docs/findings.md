@@ -1,6 +1,6 @@
 # Findings so far: RAG (Protocol B) on held-out Wikipedia
 
-**Status: working notes, 2026-09-30.** Every number below comes from a run
+**Status: working notes, 2026-10-01.** Every number below comes from a run
 whose `summary.json` records its command, commit and inputs, at the paths in
 [Provenance](#provenance). The tables were copied from those files by hand.
 CLAUDE.md asks for result tables generated from raw outputs, so a generated
@@ -144,6 +144,51 @@ offer is the article's *other* sections.
 - With the article absent (`wikipedia_1k`), the same text behaves like the
   held-out set: +0.0042, close to random.
 
+## 4. A datastore the model hasn't seen: the first sign of scaling
+
+The unseen datastores (`wikipedia_unseen_1k`, `wikipedia_unseen_10k`, built by
+`scripts/build_unseen_index.py` at `6e01075`) hold Wikipedia articles created on
+or after 2024-10-01, after Qwen2.5's release, from the 2026-03 snapshot.
+Every held-out eval article is excluded.
+
+- **Selection:** page ID ≥ 78,008,622, the ID of the first held-out article
+  created on or after the cutoff. That leaves 293,854 candidates.
+- **Spot check:** the Wikipedia API checked 100 chosen articles. One had a
+  first revision before the cutoff (2023-11-30), likely a history merge, and
+  2 have since been deleted.
+- **Sizes:** 1,000 articles (14,110 chunks, 0.87M tokens) and 10,000 articles
+  (137,568 chunks, 8.5M tokens). The 1k articles are the first 1,000 of the 10k.
+
+The refactor that moved chunking and embedding into
+`build_wiki_index.index_documents` was checked by rebuilding `wikipedia_1k`:
+`chunks.jsonl` and `index.faiss` came out byte-identical.
+
+Held-out eval, 500 articles, k = 4, runs at `6e01075` (clean). The
+no-retrieval run reproduced `1311aee` exactly (0.72149). Intervals are 95%
+paired bootstrap.
+
+| Datastore | Tokens | bpb | Δbpb vs none | 95% CI |
+|---|---|---|---|---|
+| none | – | 0.72149 | – | – |
+| random chunks (2023, 100k) | 66.5M | 0.72651 | +0.00501 | [+0.00459, +0.00542] |
+| 2023 `wikipedia_1k` | 0.69M | 0.72588 | +0.00439 | [+0.00365, +0.00505] |
+| 2023 `wikipedia_100k` | 66.5M | 0.72594 | +0.00444 | [+0.00368, +0.00511] |
+| unseen `wikipedia_unseen_1k` | 0.87M | 0.72538 | +0.00388 | [+0.00283, +0.00477] |
+| unseen `wikipedia_unseen_10k` | 8.5M | **0.72329** | **+0.00180** | [+0.00055, +0.00292] |
+
+- **Going from unseen 1k to 10k lowers bpb by 0.0021** [0.0012, 0.0032]. This
+  is the first index-size effect we have seen. The 2023 datastore showed
+  none across 100×.
+- **Unseen 10k beats 2023 100k by 0.0026** [0.0017, 0.0037], with 8× fewer
+  tokens. What matters is whether the datastore covers the eval topics, not
+  its size.
+- **RAG still costs a little overall** (+0.0018). Retrieval now recovers about
+  64% of the +0.005 insertion cost that random text pays, up from about 11% with the
+  2023 datastores.
+- The leakage filter dropped more spans with the unseen datastore (431 at 10k,
+  against 0 for random chunks), which is consistent with more of its text
+  being on topic.
+
 ## Interpretation
 
 The controls in section 3 separate the two explanations:
@@ -221,6 +266,7 @@ inputs) and `windows.jsonl`.
 | Controls: random neighbors (held-out), all in-dump runs | `eca9cf9`, clean | `data/lm_eval/eca9cf9/{eval500,indump500}/qwen2.5-7b-instruct/*` |
 | In-dump eval set | `eca9cf9`, clean | `data/eval/wiki_indump` |
 | Bootstrap intervals | `eca9cf9`, clean | `data/analysis/bootstrap_{eval500_1311aee,eval500_random,indump500}.json` |
+| Unseen datastores and their runs | `6e01075`, clean | `data/wiki_index/wikipedia_unseen_{1k,10k}`, `data/lm_eval/6e01075/eval500/qwen2.5-7b-instruct/*`, `data/analysis/bootstrap_eval500_unseen.json` |
 | GPU search vs FAISS | `7102b4f` + uncommitted script (hash in output) | `data/verification/exact_search_wikipedia_100k.json` |
 
 Command for the main runs, with `--arm`, `--index` and `--k` varied:
